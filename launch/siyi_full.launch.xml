@@ -23,6 +23,13 @@ SPDX-FileCopyrightText: Czech Technical University in Prague
   <arg name="namespace" default="" />
   <arg name="camera_name" default="siyi_camera" description="Camera name used by camera_info_manager" />
   <arg name="camera_info_url" default="" description="URL to camera calibration YAML loaded via camera_info_manager. Examples: file:///abs/path/calib.yaml  or package://siyi_ros2/config/calib.yaml. Leave empty to publish uncalibrated CameraInfo." />
+  <arg name="zoom_threshold" default="0.1" description="Deadband on cmd_vel linear.x before the zoom is engaged" />
+  <arg name="cmd_vel_timeout" default="0.2" description="Freeze the zoom when no cmd_vel arrives for this long (seconds)" />
+  <arg name="zoom_speed" default="2.0" description="Zoom levels per second at full cmd_vel linear.x (1.0)" />
+  <arg name="zoom_rate_hz" default="3.5" description="How often the absolute zoom requests are sent (max 4 Hz)" />
+  <arg name="zoom_service_timeout" default="2.0" description="Give up on an unanswered set_zoom request after this long (seconds)" />
+  <arg name="max_zoom" default="30.0" description="Upper zoom bound (the driver accepts at most 30.0)" />
+  <arg name="initial_zoom" default="1.0" description="Zoom level the node assumes the camera starts at" />
   
   <set_env name="GST_DEBUG" value="0" />
   <set_env name="SIYI_LOG_LEVEL" value="WARNING" />
@@ -53,5 +60,15 @@ SPDX-FileCopyrightText: Czech Technical University in Prague
     <param name="latency_ms" value="$(var latency_ms)" />
     <param name="camera_info_url" value="$(var camera_info_url)" />
     <param name="camera_name" value="$(var camera_name)" />
+  </node>
+
+  <node name="cmd_vel_to_gimbal" pkg="cras_siyi_driver" exec="cmd_vel_to_gimbal" namespace="$(var namespace)" output="screen">
+    <param name="zoom_threshold" value="$(var zoom_threshold)" />
+    <param name="cmd_vel_timeout" value="$(var cmd_vel_timeout)" />
+    <param name="zoom_speed" value="$(var zoom_speed)" />
+    <param name="zoom_rate_hz" value="$(var zoom_rate_hz)" />
+    <param name="zoom_service_timeout" value="$(var zoom_service_timeout)" />
+    <param name="max_zoom" value="$(var max_zoom)" />
+    <param name="initial_zoom" value="$(var initial_zoom)" />
   </node>
 </launch>
