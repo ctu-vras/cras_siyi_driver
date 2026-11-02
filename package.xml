@@ -1,0 +1,46 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<!--
+SPDX-License-Identifier: BSD-3-Clause
+SPDX-FileCopyrightText: Czech Technical University in Prague
+-->
+<package format="3">
+  <name>cras_siyi_driver</name>
+  <version>0.0.0</version>
+  <description>CRAS wrapper of siyi_ros2 driver for SIYI gimbal-camera systems</description>
+  <maintainer email="peckama2@fel.cvut.cz">Martin Pecka</maintainer>
+  <license>BSD-3-Clause</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+  
+  <exec_depend>camera_info_manager</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>gstreamer1.0-libav</exec_depend>
+  <exec_depend>gstreamer1.0-plugins-bad</exec_depend>
+  <exec_depend>gstreamer1.0-plugins-base</exec_depend>
+  <exec_depend>gstreamer1.0-plugins-good</exec_depend>
+  <exec_depend>gstreamer1.0-plugins-ugly</exec_depend>
+  <exec_depend>gstreamer1.0</exec_depend>
+  <exec_depend>libcairo2-dev</exec_depend>
+  <exec_depend>libgirepository-dev</exec_depend>
+  <exec_depend>libglib-dev</exec_depend>
+  <exec_depend>libgstreamer-plugins-base1.0-dev</exec_depend>
+  <exec_depend>libgstreamer1.0-dev</exec_depend>
+  <exec_depend>python3-cv-bridge</exec_depend>
+  <exec_depend>python3-dev</exec_depend>
+  <exec_depend>python3-gi-cairo</exec_depend>
+  <exec_depend>python3-gi</exec_depend>
+  <exec_depend>python3-kivy</exec_depend>  <!-- for pulling python3-gst-1.0 -->
+  <exec_depend>python3-opencv</exec_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>siyi_msgs</exec_depend>
+  <exec_depend>siyi_ros2</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>std_srvs</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

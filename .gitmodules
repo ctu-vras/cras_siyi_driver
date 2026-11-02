@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# SPDX-FileCopyrightText: Czech Technical University in Prague
+
+[submodule "siyi_sdk"]
+	path = siyi_sdk
+	url = https://github.com/mzahana/siyi_sdk
+	branch = siyi-sdk-v2

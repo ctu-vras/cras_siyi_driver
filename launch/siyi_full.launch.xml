@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!--
+SPDX-License-Identifier: BSD-3-Clause
+SPDX-FileCopyrightText: Czech Technical University in Prague
+-->
+<launch>
+  <arg name="host" default="192.168.144.25" description="SIYI device IP address" />
+  <arg name="port" default="37260" />
+  <arg name="transport" default="udp" />
+  <arg name="attitude_stream_hz" default="10" />
+  <arg name="auto_reconnect" default="false" />
+  <arg name="publish_tf" default="false" description="Broadcast dynamic TF from tf_parent_frame to tf_child_frame" />
+  <arg name="tf_parent_frame" default="base_link" description="Parent TF frame (vehicle body frame)" />
+  <arg name="tf_child_frame" default="siyi_gimbal" description="Child TF frame (gimbal frame)" />
+  <arg name="camera_model" default="zt30" description="Camera model key for RTSP URL" />
+  <arg name="stream_index" default="0" />
+  <arg name="backend" default="gstreamer" description="Video backend: gstreamer | opencv | aiortsp" />
+  <arg name="publish_raw" default="true" />
+  <arg name="publish_compressed" default="true" />
+  <arg name="image_scale" default="1.0" />
+  <arg name="jpeg_quality" default="80" />
+  <arg name="latency_ms" default="0" />
+  <arg name="namespace" default="" />
+  <arg name="camera_name" default="siyi_camera" description="Camera name used by camera_info_manager" />
+  <arg name="camera_info_url" default="" description="URL to camera calibration YAML loaded via camera_info_manager. Examples: file:///abs/path/calib.yaml  or package://siyi_ros2/config/calib.yaml. Leave empty to publish uncalibrated CameraInfo." />
+  
+  <set_env name="GST_DEBUG" value="0" />
+  <set_env name="SIYI_LOG_LEVEL" value="WARNING" />
+  <set_env name="SIYI_PROTOCOL_TRACE" value="0" />
+  
+  <node name="siyi_node" pkg="siyi_ros2" exec="siyi_node" namespace="$(var namespace)" output="screen">
+    <param from="$(find-pkg-share siyi_ros2)/config/siyi_params.yaml" />
+    <param name="host" value="$(var host)" />
+    <param name="port" value="$(var port)" />
+    <param name="transport" value="$(var transport)" />
+    <param name="attitude_stream_hz" value="$(var attitude_stream_hz)" />
+    <param name="auto_reconnect" value="$(var auto_reconnect)" />
+    <param name="publish_tf" value="$(var publish_tf)" />
+    <param name="tf_parent_frame" value="$(var tf_parent_frame)" />
+    <param name="tf_child_frame" value="$(var tf_child_frame)" />
+  </node>
+
+  <node name="siyi_camera_node" pkg="siyi_ros2" exec="siyi_camera_node" namespace="$(var namespace)" output="screen">
+    <param from="$(find-pkg-share siyi_ros2)/config/camera_params.yaml" />
+    <param name="host" value="$(var host)" />
+    <param name="camera_model" value="$(var camera_model)" />
+    <param name="stream_index" value="$(var stream_index)" />
+    <param name="backend" value="$(var backend)" />
+    <param name="publish_raw" value="$(var publish_raw)" />
+    <param name="publish_compressed" value="$(var publish_compressed)" />
+    <param name="image_scale" value="$(var image_scale)" />
+    <param name="jpeg_quality" value="$(var jpeg_quality)" />
+    <param name="latency_ms" value="$(var latency_ms)" />
+    <param name="camera_info_url" value="$(var camera_info_url)" />
+    <param name="camera_name" value="$(var camera_name)" />
+  </node>
+</launch>
