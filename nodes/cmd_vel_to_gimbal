@@ -4,17 +4,22 @@
 # SPDX-FileCopyrightText: Czech Technical University in Prague
 
 import math
+from threading import Lock
 
 from geometry_msgs.msg import TwistStamped
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import qos_profile_sensor_data, qos_profile_system_default, QoSProfile, DurabilityPolicy
 from siyi_msgs.msg import GimbalRateCmd
-from siyi_msgs.srv import SetAbsoluteZoom
+from siyi_msgs.srv import CenterGimbal, SetAbsoluteZoom
+from std_msgs.msg import Float32
+from std_srvs.srv import Trigger
 
 MIN_ZOOM = 1.0
 MAX_ZOOM_LIMIT = 30.0
+MIN_ZOOM_RATE = 0.1
+MAX_ZOOM_RATE = 5.0
 
 
 class CmdVelToGimbal(Node):
@@ -22,125 +27,230 @@ class CmdVelToGimbal(Node):
     def __init__(self, **kwargs) -> None:
         super().__init__('cmd_vel_to_gimbal', **kwargs)
 
-        self.declare_parameter('zoom_threshold', 0.1)
-        self.declare_parameter('rate_scale', 1.0)
-        self.declare_parameter('cmd_vel_timeout', 0.2)
-        self.declare_parameter('zoom_speed', 2.0)
-        self.declare_parameter('zoom_rate_hz', 3.5)
-        self.declare_parameter('zoom_service_timeout', 2.0)
-        self.declare_parameter('max_zoom', MAX_ZOOM_LIMIT)
-        self.declare_parameter('initial_zoom', MIN_ZOOM)
-
-        self._cmd_vel_topic = 'siyi/cmd/cmd_vel'
-        self._rate_topic = 'siyi/cmd/rate'
+        cmd_vel_topic = 'siyi/cmd/cmd_vel'
+        cmd_pos_rel_topic = 'siyi/cmd/cmd_pos_rel'
+        cmd_pos_topic = 'siyi/cmd/cmd_pos'
+        rate_topic = 'siyi/cmd/rate'
         self._zoom_service = 'siyi/set_zoom'
+        center_service = 'siyi/cmd/center'
+        self._center_gimbal_service = 'siyi/center'
+        zoom_topic = 'siyi/zoom'
 
-        self._zoom_threshold = float(self.get_parameter('zoom_threshold').value)
-        self._rate_scale = float(self.get_parameter('rate_scale').value)
-        self._cmd_vel_timeout = float(self.get_parameter('cmd_vel_timeout').value)
-        self._zoom_speed = max(0.0, float(self.get_parameter('zoom_speed').value))
-        self._zoom_rate_hz = min(4.0, max(0.5, float(self.get_parameter('zoom_rate_hz').value)))
-        self._zoom_timeout = max(0.2, float(self.get_parameter('zoom_service_timeout').value))
-        self._max_zoom = min(MAX_ZOOM_LIMIT, max(MIN_ZOOM, float(self.get_parameter('max_zoom').value)))
+        self._zoom_threshold = max(0.0, self.declare_parameter('zoom_threshold', 0.1).value)
+        self._zoom_rate_hz = min(4.0, max(0.5, self.declare_parameter('zoom_rate_hz', 3.5).value))
+        self._zoom_timeout = max(0.2, self.declare_parameter('zoom_service_timeout', 2.0).value)
+        self._cmd_vel_timeout = max(0.1, self.declare_parameter('cmd_vel_timeout', 0.2).value)
+        self._max_zoom = min(MAX_ZOOM_LIMIT, max(MIN_ZOOM, self.declare_parameter('max_zoom', MAX_ZOOM_LIMIT).value))
+        self._max_zoom_rate = min(MAX_ZOOM_RATE, max(MIN_ZOOM_RATE, self.declare_parameter('max_zoom_rate', 3.0).value))
+        self._pos_rate_hz = min(50.0, max(2.0, self.declare_parameter('pos_rate_hz', 10.0).value))
+        self._pos_max_rate = max(math.radians(1.0), self.declare_parameter('pos_max_rate', math.radians(30.0)).value)
+        self._pos_tolerance = math.radians(max(0.1, self.declare_parameter('pos_tolerance_deg', 1.0).value))
+        self._zoom_target = self._clamp_zoom(self.declare_parameter('initial_zoom', MIN_ZOOM).value)
 
-        self._zoom_target = self._clamp_zoom(float(self.get_parameter('initial_zoom').value))
-        self._zoom_velocity = 0.0
-        self._last_cmd_vel_time = None
-        self._last_tick = None
+        self._zoom_rate = 0.0
+        self._last_zoom_rate_cmd_time = None
+        self._last_zoom_tick = None
         self._sent_zoom = None
         self._zoom_pending = False
         self._pending_since = None
         self._zoom_seq = 0
+        self._center_seq = 0
         self._resend_needed = False
         self._zoom_fails = 0
         self._next_retry_ns = 0
+        self._zoom_lock = Lock()
 
-        self._rate_pub = self.create_publisher(GimbalRateCmd, self._rate_topic, qos_profile_sensor_data)
+        self._remaining_delta_yaw = 0.0
+        self._remaining_delta_pitch = 0.0
+        self._remaining_delta_zoom = 0.0
+        self._remaining_pos_lock = Lock()
+
+        zoom_qos = QoSProfile(**qos_profile_system_default.get_c_qos_profile().to_dict())
+        zoom_qos.durability = DurabilityPolicy.TRANSIENT_LOCAL
+
+        self._rate_pub = self.create_publisher(GimbalRateCmd, rate_topic, qos_profile_sensor_data)
+        self._zoom_pub = self.create_publisher(Float32, zoom_topic, zoom_qos)
         self._zoom_client = self.create_client(SetAbsoluteZoom, self._zoom_service)
-        self.create_subscription(TwistStamped, self._cmd_vel_topic, self._on_cmd_vel, qos_profile_sensor_data)
+        self._center_client = self.create_client(CenterGimbal, self._center_gimbal_service)
+        
+        self._center_server = self.create_service(Trigger, center_service, self._on_center)
+
+        self.create_subscription(TwistStamped, cmd_vel_topic, self._on_cmd_vel, qos_profile_sensor_data)
+        self.create_subscription(TwistStamped, cmd_pos_topic, self._on_cmd_pos, qos_profile_system_default)
+        self.create_subscription(TwistStamped, cmd_pos_rel_topic, self._on_cmd_pos_rel, qos_profile_system_default)
+
         self.create_timer(1.0 / self._zoom_rate_hz, self._on_zoom_tick)
+        self.create_timer(1.0 / self._pos_rate_hz, self._on_pos_tick)
 
         self.get_logger().info(
-            f'{self._cmd_vel_topic} -> {self._rate_topic} + {self._zoom_service} '
-            f'(zoom {MIN_ZOOM:.1f}-{self._max_zoom:.1f}x, {self._zoom_rate_hz:.1f} Hz, {self._zoom_speed:.1f}x/s)'
+            f'{cmd_vel_topic} + {cmd_pos_rel_topic} -> {rate_topic} + {self._zoom_service} + {center_service} '
+            f'(zoom {MIN_ZOOM:.1f}-{self._max_zoom:.1f}x, {self._zoom_rate_hz:.1f} Hz, {self._max_zoom_rate:.1f}x/s, '
+            f'pose {self._pos_rate_hz:.1f} Hz, max {math.degrees(self._pos_max_rate):.1f} deg/s)'
         )
 
+    def _is_executing_pos_command(self) -> bool:
+        with self._remaining_pos_lock:
+            if max(abs(self._remaining_delta_yaw), abs(self._remaining_delta_pitch)) > self._pos_tolerance:
+                return True
+            return abs(self._remaining_delta_zoom) > self._zoom_threshold
+
     def _on_cmd_vel(self, msg: TwistStamped) -> None:
+        self._update_zoom_rate(msg.twist.linear.x)
+        if self._is_executing_pos_command():
+            return
+
+        self._publish_pose_rate(msg.twist.angular.z, msg.twist.angular.y)
+
+    def _on_cmd_pos(self, msg: TwistStamped) -> None:
+        if max(abs(msg.twist.angular.y), abs(msg.twist.angular.z)) > 0.01:
+            self.get_logger().warning(
+                'Absolute position commands for gimbal are not supported. Ignoring them.', throttle_duration_sec=5.0)
+
+        zoom = None
+        with self._zoom_lock:
+            zoom = self._round_zoom(msg.twist.linear.x)
+            if zoom != self._zoom_target:
+                self._zoom_target = zoom
+            else:
+                zoom = None
+
+        if zoom is not None:    
+            self._send_zoom(zoom)
+
+    def _on_cmd_pos_rel(self, msg: TwistStamped) -> None:
+        with self._remaining_pos_lock:
+            self._remaining_delta_yaw += msg.twist.angular.z
+            self._remaining_delta_pitch += msg.twist.angular.y
+
+        zoom = None
+        with self._zoom_lock:
+            zoom = self._round_zoom(self._zoom_target + msg.twist.linear.x)
+            if zoom != self._zoom_target:
+                self._zoom_target = zoom
+            else:
+                zoom = None
+
+        if zoom is not None:    
+            self._send_zoom(zoom)
+
+    def _on_pos_tick(self) -> None:
+        if not self._is_executing_pos_command():
+            return
+
+        with self._remaining_pos_lock:
+            yaw_error = self._remaining_delta_yaw
+            pitch_error = self._remaining_delta_pitch
+            if abs(yaw_error) <= self._pos_tolerance and abs(pitch_error) <= self._pos_tolerance:
+                self._remaining_delta_yaw = 0.0
+                self._remaining_delta_pitch = 0.0
+                yaw_rate = pitch_rate = 0.0
+            else:
+                max_delta = self._pos_max_rate / self._pos_rate_hz
+                yaw_delta = max(-max_delta, min(yaw_error, max_delta))
+                pitch_delta = max(-max_delta, min(pitch_error, max_delta))
+                yaw_rate = yaw_delta * self._pos_rate_hz
+                pitch_rate = pitch_delta * self._pos_rate_hz
+
+                if abs(yaw_delta) < abs(self._remaining_delta_yaw):
+                    self._remaining_delta_yaw -= yaw_delta
+                else:
+                    self._remaining_delta_yaw = 0.0
+
+                if abs(pitch_delta) < abs(self._remaining_delta_pitch):
+                    self._remaining_delta_pitch -= pitch_delta
+                else:
+                    self._remaining_delta_pitch = 0.0
+
+        self._publish_pose_rate(yaw_rate, pitch_rate)
+
+    def _publish_pose_rate(self, yaw_rate: float, pitch_rate: float) -> None:
         rate = GimbalRateCmd()
-        rate.header = msg.header
-        rate.yaw_rate_dps = -float(math.degrees(msg.twist.angular.z) * self._rate_scale)
-        rate.pitch_rate_dps = -float(math.degrees(msg.twist.angular.y) * self._rate_scale)
+        rate.header.stamp = self.get_clock().now().to_msg()
+        rate.yaw_rate_dps = -math.degrees(float(yaw_rate))
+        rate.pitch_rate_dps = -math.degrees(float(pitch_rate))
         self._rate_pub.publish(rate)
 
-        zoom = float(msg.twist.linear.x)
-        self._zoom_velocity = 0.0 if abs(zoom) <= self._zoom_threshold else max(-1.0, min(1.0, zoom))
-        self._last_cmd_vel_time = self.get_clock().now()
+    def _update_zoom_rate(self, rate: float) -> None:
+        with self._zoom_lock:
+            self._zoom_rate = self._clamp_zoom_rate(rate)
+            self._last_zoom_rate_cmd_time = self.get_clock().now()
 
     def _on_zoom_tick(self) -> None:
-        now = self.get_clock().now()
-        dt = 0.0 if self._last_tick is None else (now - self._last_tick).nanoseconds / 1e9
-        self._last_tick = now
-        dt = min(max(dt, 0.0), 4.0 / self._zoom_rate_hz)
-
-        if self._zoom_velocity != 0.0 and self._last_cmd_vel_time is not None:
-            if (now - self._last_cmd_vel_time).nanoseconds / 1e9 > self._cmd_vel_timeout:
-                self._zoom_velocity = 0.0
-
-        self._zoom_target = self._clamp_zoom(self._zoom_target + self._zoom_velocity * self._zoom_speed * dt)
-
-        zoom = self._round_zoom(self._zoom_target)
-        if self._zoom_pending and (now - self._pending_since).nanoseconds / 1e9 > self._zoom_timeout:
-            self.get_logger().warn(
-                f'{self._zoom_service} did not respond in {self._zoom_timeout:.1f} s', throttle_duration_sec=5.0
-            )
-            self._forget_zoom_call()
-            self._note_zoom_failure()
-        if self._zoom_pending:
-            return
-        if zoom == self._sent_zoom and (not self._resend_needed or now.nanoseconds < self._next_retry_ns):
-            return
-
-        if not self._zoom_client.service_is_ready():
-            self._warn_service_unavailable()
-            return
+        with self._zoom_lock:
+            now = self.get_clock().now()
+            dt = 0.0 if self._last_zoom_tick is None else (now - self._last_zoom_tick).nanoseconds / 1e9
+            self._last_zoom_tick = now
+            dt = min(max(dt, 0.0), 4.0 / self._zoom_rate_hz)
+    
+            if self._zoom_rate != 0.0 and self._last_zoom_rate_cmd_time is not None:
+                if (now - self._last_zoom_rate_cmd_time).nanoseconds / 1e9 > self._cmd_vel_timeout:
+                    self._zoom_rate = 0.0
+    
+            self._zoom_target = self._clamp_zoom(self._zoom_target + self._zoom_rate * dt)
+    
+            zoom = self._round_zoom(self._zoom_target)
+            if self._zoom_pending and (now - self._pending_since).nanoseconds / 1e9 > self._zoom_timeout:
+                self.get_logger().warn(
+                    f'{self._zoom_service} did not respond in {self._zoom_timeout:.1f} s', throttle_duration_sec=5.0
+                )
+                self._forget_zoom_call()
+                self._note_zoom_failure()
+            if self._zoom_pending:
+                return
+            if zoom == self._sent_zoom and (not self._resend_needed or now.nanoseconds < self._next_retry_ns):
+                return
 
         self._send_zoom(zoom)
 
     def _clamp_zoom(self, zoom: float) -> float:
         return min(self._max_zoom, max(MIN_ZOOM, zoom))
 
+    def _clamp_zoom_rate(self, rate: float) -> float:
+        if abs(rate) < MIN_ZOOM_RATE:
+            return 0.0
+        return min(self._max_zoom_rate, max(-self._max_zoom_rate, rate))
+
     def _round_zoom(self, zoom: float) -> float:
         return round(self._clamp_zoom(zoom), 1)
 
     def _send_zoom(self, zoom: float) -> None:
-        self._sent_zoom = zoom
-        self._zoom_pending = True
-        self._pending_since = self.get_clock().now()
-        self._zoom_seq += 1
-        request = SetAbsoluteZoom.Request()
-        request.zoom_level = float(zoom)
-        future = self._zoom_client.call_async(request)
-        future.add_done_callback(lambda finished, seq=self._zoom_seq: self._on_zoom_done(finished, seq))
+        if not self._zoom_client.service_is_ready():
+            self._warn_zoom_service_unavailable()
+            return
+
+        zoom_msg = Float32(data=zoom)
+        self._zoom_pub.publish(zoom_msg)
+
+        with self._zoom_lock:
+            self._sent_zoom = zoom
+            self._zoom_pending = True
+            self._pending_since = self.get_clock().now()
+            self._zoom_seq += 1
+            request = SetAbsoluteZoom.Request()
+            request.zoom_level = float(zoom)
+            future = self._zoom_client.call_async(request)
+            future.add_done_callback(lambda finished, seq=self._zoom_seq: self._on_zoom_done(finished, seq))
 
     def _on_zoom_done(self, future, seq: int) -> None:
-        if seq != self._zoom_seq:
-            return
-        self._forget_zoom_call()
-        try:
-            response = future.result()
-        except Exception as exc:
-            self.get_logger().error(f'{self._zoom_service} call failed: {exc}', throttle_duration_sec=5.0)
-            self._note_zoom_failure()
-            return
-
-        if not response.success:
-            self.get_logger().warn(
-                f'{self._zoom_service} rejected the command: {response.message}', throttle_duration_sec=5.0
-            )
-            self._note_zoom_failure()
-        else:
-            self._resend_needed = False
-            self._zoom_fails = 0
+        with self._zoom_lock:
+            if seq != self._zoom_seq:
+                return
+            self._forget_zoom_call()
+            try:
+                response = future.result()
+            except Exception as exc:
+                self.get_logger().error(f'{self._zoom_service} call failed: {exc}', throttle_duration_sec=5.0)
+                self._note_zoom_failure()
+                return
+    
+            if not response.success:
+                self.get_logger().warn(
+                    f'{self._zoom_service} rejected the command: {response.message}', throttle_duration_sec=5.0
+                )
+                self._note_zoom_failure()
+            else:
+                self._resend_needed = False
+                self._zoom_fails = 0
 
     def _forget_zoom_call(self) -> None:
         self._zoom_pending = False
@@ -151,8 +261,38 @@ class CmdVelToGimbal(Node):
         self._zoom_fails += 1
         self._next_retry_ns = self.get_clock().now().nanoseconds + int(min(2.0 ** self._zoom_fails, 30.0) * 1e9)
 
-    def _warn_service_unavailable(self) -> None:
+    def _warn_zoom_service_unavailable(self) -> None:
         self.get_logger().warning(f'Service {self._zoom_service} is not available', throttle_duration_sec=5.0)
+    
+    def _on_center(self, _: Trigger.Request, resp: Trigger.Response) -> Trigger.Response:
+        if not self._center_client.service_is_ready():
+            self._warn_center_service_unavailable()
+            resp.message = f'Service {self._center_gimbal_service} is not available'
+            resp.success = False
+            return resp
+
+        self._center_seq += 1
+        future = self._center_client.call_async(CenterGimbal.Request())
+        future.add_done_callback(lambda finished, seq=self._center_seq: self._on_center_done(finished, seq))
+        
+        resp.success = True
+        return resp
+
+    def _on_center_done(self, future, seq: int) -> None:
+        if seq != self._zoom_seq:
+            return
+        try:
+            response = future.result()
+        except Exception as exc:
+            self.get_logger().error(f'{self._center_gimbal_service} call failed: {exc}', throttle_duration_sec=5.0)
+            return
+
+        if not response.success:
+            self.get_logger().warn(
+                f'{self._center_gimbal_service} rejected the command: {response.message}', throttle_duration_sec=5.0)
+
+    def _warn_center_service_unavailable(self) -> None:
+        self.get_logger().warning(f'Service {self._center_gimbal_service} is not available', throttle_duration_sec=5.0)
 
 
 def main(args=None) -> None:

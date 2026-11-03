@@ -21,22 +21,46 @@ have both packages.
 
 ### `cmd_vel_to_gimbal`
 
-Subscribes to `/siyi/cmd/cmd_vel` (`geometry_msgs/TwistStamped`) and republishes it as gimbal
-commands understood by siyi_ros2:
+Turns `geometry_msgs/TwistStamped` commands into the gimbal commands understood by siyi_ros2:
+`siyi_msgs/GimbalRateCmd` on `siyi/cmd/rate`, `siyi_msgs/srv/SetAbsoluteZoom` service calls on
+`siyi/set_zoom` and `siyi_msgs/srv/CenterGimbal` on `siyi/center`.
 
-- `siyi_msgs/GimbalRateCmd` on `/siyi/cmd/rate`, using `angular.z` as the yaw rate and `angular.y`
-  as the pitch rate (converted from rad/s to deg/s and multiplied by `rate_scale`),
-- `siyi_msgs/srv/SetAbsoluteZoom` service calls on `/siyi/set_zoom`, using `linear.x` as a zoom
-  velocity (clamped to ±1, ignored within `zoom_threshold`). The camera cannot report its zoom level,
-  so the node is the sole authority on it: it keeps its own estimate, starting at `initial_zoom`
-  (default `1.0`, which is also the minimum), never exceeds `max_zoom` (at most `30.0`), and
-  integrates the velocity into it (`zoom_speed` zoom levels per second at full `linear.x`). The
-  estimate is sent as an absolute zoom request at most `zoom_rate_hz` times per second (4 Hz
-  maximum), so the zoom feels velocity-controlled while still being responsive. Only one request is
-  in flight at a time and it always carries the newest zoom level. The first request is sent as soon
-  as the service is available, and the estimate stops advancing when no `cmd_vel` arrives for
-  `cmd_vel_timeout` seconds. A request unanswered for `zoom_service_timeout` seconds is abandoned,
-  and a failed or abandoned zoom level is retried with a growing backoff for as long as the node
-  wants the camera to be there.
+Multiple gimbal control modes are available:
 
-It is launched by `siyi_full.launch.xml`.
+#### Rate mode: `siyi/cmd/cmd_vel`
+
+`angular.z` is the requested yaw rate and `angular.y` the requested pitch rate in rad/s.
+
+`linear.x` is interpreted as change in zoom levels per second.
+
+#### Relative position mode: `siyi/cmd/cmd_pos_rel`
+
+Here the twist is a requested *relative pose change*: every message asks for a rotation of
+`angular.z` around yaw and `angular.y` around pitch (in radians) with respect to the pose the camera
+is currently at. An open-loop proportional controller running at `pos_rate_hz`
+servos the gimbal to the requested pose through `siyi/cmd/rate` (output clamped to `pos_max_rate`
+rad/s) and goes quiet once the pose is within `pos_tolerance_deg` from the relative target.
+
+`linear.x` is interpreted as relative change in zoom level. The zoom is changed as fast as possible.
+
+While a relative position command is being executed, all rate commands are ignored.
+
+#### Absolute position mode: `siyi/cmd/cmd_pos`
+
+So far, absolute pose gimbal control is not implemented. Only zoom is working in this mode.
+
+`linear.x` is interpreted as absolute zoom level. The zoom is changed as fast as possible.
+
+#### Zoom details
+
+The node calls `siyi_msgs/srv/SetAbsoluteZoom` on `siyi/set_zoom`, even for velocity commands,
+because the ManualZoom topic is broken. The camera cannot report its zoom level,
+so the node is the sole authority on it: it keeps its own estimate starting at `initial_zoom`
+(default `1.0`, which is also the minimum), never exceeds `max_zoom` (at most `30.0`), and integrates
+the velocity or pose changes into it. The estimate is sent to topic `siyi/zoom` (latched) and also
+to `siyi/set_zoom` (`zoom_rate_hz` times per second), so the zoom
+feels velocity-controlled while still being responsive. Only one request is in flight at a time and
+it always carries the newest zoom level.
+
+Because the camera doesn't report its zoom level, treat the value as a rough estimate (namely, the
+camera animates the zoom level changes, but this node reports the changes as executed instantly).

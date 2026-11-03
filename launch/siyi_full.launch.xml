@@ -25,11 +25,14 @@ SPDX-FileCopyrightText: Czech Technical University in Prague
   <arg name="camera_info_url" default="" description="URL to camera calibration YAML loaded via camera_info_manager. Examples: file:///abs/path/calib.yaml  or package://siyi_ros2/config/calib.yaml. Leave empty to publish uncalibrated CameraInfo." />
   <arg name="zoom_threshold" default="0.1" description="Deadband on cmd_vel linear.x before the zoom is engaged" />
   <arg name="cmd_vel_timeout" default="0.2" description="Freeze the zoom when no cmd_vel arrives for this long (seconds)" />
-  <arg name="zoom_speed" default="2.0" description="Zoom levels per second at full cmd_vel linear.x (1.0)" />
   <arg name="zoom_rate_hz" default="3.5" description="How often the absolute zoom requests are sent (max 4 Hz)" />
   <arg name="zoom_service_timeout" default="2.0" description="Give up on an unanswered set_zoom request after this long (seconds)" />
-  <arg name="max_zoom" default="30.0" description="Upper zoom bound (the driver accepts at most 30.0)" />
+  <arg name="max_zoom" default="6.0" description="Upper zoom bound (the driver accepts at most 30.0)" />
+  <arg name="max_zoom_rate" default="3.0" description="Maximum rate of change of zoom level (levels per second)" />
   <arg name="initial_zoom" default="1.0" description="Zoom level the node assumes the camera starts at" />
+  <arg name="pos_rate_hz" default="10.0" description="Frequency at which relative pose requests are sent" />
+  <arg name="pos_max_rate" default="$(eval 'math.radians(30.0)')" description="Angular rate used to achieve relative pose target (rad/s)" />
+  <arg name="pos_tolerance_deg" default="1.0" description="Pose error below which the requested pose is considered reached" />
   
   <set_env name="GST_DEBUG" value="0" />
   <set_env name="SIYI_LOG_LEVEL" value="WARNING" />
@@ -45,6 +48,9 @@ SPDX-FileCopyrightText: Czech Technical University in Prague
     <param name="publish_tf" value="$(var publish_tf)" />
     <param name="tf_parent_frame" value="$(var tf_parent_frame)" />
     <param name="tf_child_frame" value="$(var tf_child_frame)" />
+    <!-- The driver has wrong pitch limits, the real pitch is -155 (looking down), flip -180->0, to 90 (looking up) -->
+    <param name="pitch_min_deg" value="-180.0" />
+    <param name="pitch_max_deg" value="180.0" />
   </node>
 
   <node name="siyi_camera_node" pkg="siyi_ros2" exec="siyi_camera_node" namespace="$(var namespace)" output="screen">
@@ -65,10 +71,13 @@ SPDX-FileCopyrightText: Czech Technical University in Prague
   <node name="cmd_vel_to_gimbal" pkg="cras_siyi_driver" exec="cmd_vel_to_gimbal" namespace="$(var namespace)" output="screen">
     <param name="zoom_threshold" value="$(var zoom_threshold)" />
     <param name="cmd_vel_timeout" value="$(var cmd_vel_timeout)" />
-    <param name="zoom_speed" value="$(var zoom_speed)" />
     <param name="zoom_rate_hz" value="$(var zoom_rate_hz)" />
     <param name="zoom_service_timeout" value="$(var zoom_service_timeout)" />
     <param name="max_zoom" value="$(var max_zoom)" />
+    <param name="max_zoom_rate" value="$(var max_zoom_rate)" />
     <param name="initial_zoom" value="$(var initial_zoom)" />
+    <param name="pos_rate_hz" value="$(var pos_rate_hz)" />
+    <param name="pos_max_rate" value="$(var pos_max_rate)" />
+    <param name="pos_tolerance_deg" value="$(var pos_tolerance_deg)" />
   </node>
 </launch>
