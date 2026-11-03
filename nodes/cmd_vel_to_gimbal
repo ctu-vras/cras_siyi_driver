@@ -67,6 +67,7 @@ class CmdVelToGimbal(Node):
 
         zoom_qos = QoSProfile(**qos_profile_system_default.get_c_qos_profile().to_dict())
         zoom_qos.durability = DurabilityPolicy.TRANSIENT_LOCAL
+        zoom_qos.depth = 1
 
         self._rate_pub = self.create_publisher(GimbalRateCmd, rate_topic, qos_profile_sensor_data)
         self._zoom_pub = self.create_publisher(Float32, zoom_topic, zoom_qos)
