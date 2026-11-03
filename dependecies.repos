@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# SPDX-FileCopyrightText: Czech Technical University in Prague
+
+repositories:
+  siyi_msgs:
+    type: git
+    url: https://github.com/mzahana/siyi_msgs.git
+    version: main
+  siyi_ros2:
+    type: git
+    url: https://github.com/mzahana/siyi_ros2
+    version: main
