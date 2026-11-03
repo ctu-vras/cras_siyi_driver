@@ -66,7 +66,7 @@ SPDX-FileCopyrightText: Czech Technical University in Prague
     <param name="latency_ms" value="$(var latency_ms)" />
     <param name="camera_info_url" value="$(var camera_info_url)" />
     <param name="camera_name" value="$(var camera_name)" />
-    <remap from="siyi/image_compressed" to="siyi/image/compressed" />
+    <remap from="siyi/image_compressed" to="siyi/image_raw/compressed" />
   </node>
 
   <node name="cmd_vel_to_gimbal" pkg="cras_siyi_driver" exec="cmd_vel_to_gimbal" namespace="$(var namespace)" output="screen">
