@@ -21,9 +21,9 @@ have both packages.
 
 ### `cmd_vel_to_gimbal`
 
-Turns `geometry_msgs/TwistStamped` commands into the gimbal commands understood by siyi_ros2:
+Turns general PTZ commands into the ones understood by siyi_ros2:
 `siyi_msgs/GimbalRateCmd` on `siyi/cmd/rate`, `siyi_msgs/srv/SetAbsoluteZoom` service calls on
-`siyi/set_zoom` and `siyi_msgs/srv/CenterGimbal` on `siyi/center`.
+`siyi/set_zoom`, `siyi_msgs/srv/SetGimbalAttitude` on `siyi/set_attitude` and `siyi_msgs/srv/CenterGimbal` calls on `siyi/center`.
 
 Multiple gimbal control modes are available:
 
@@ -39,9 +39,9 @@ If the number is not finite, the zoom part of the command is ignored.
 
 Here the twist is a requested *relative pose change*: every message asks for a rotation of
 `angular.z` around yaw and `angular.y` around pitch (in radians) with respect to the pose the camera
-is currently at. An open-loop proportional controller running at `pos_rate_hz`
-servos the gimbal to the requested pose through `siyi/cmd/rate` (output clamped to `pos_max_rate`
-rad/s) and goes quiet once the pose is within `pos_tolerance_deg` from the relative target.
+is currently at. The requested rotations are accumulated and then executed open-loop at
+`pos_rate_hz` through `siyi/cmd/rate`, moving at most `pos_max_rate` rad/s per axis. If a component is not finite, that component of the command is
+ignored.
 
 `linear.x` is interpreted as relative change in zoom level. The zoom is changed as fast as possible.
 
@@ -49,19 +49,22 @@ While a relative position command is being executed, all rate commands are ignor
 
 #### Absolute position mode: `siyi/cmd/cmd_pos`
 
-`pose.orientation` is interpreted as the desired gimbal pose. Only pitch and yaw components are
+`pose.orientation` is interpreted as the desired gimbal pose and sent to
+`siyi_msgs/srv/SetGimbalAttitude` on `siyi/set_attitude`. Only pitch and yaw components are
 used. If the quaternion is invalid or not normalized, the attitude part of the command is ignored.
 
-`pose.position.x` is interpreted as absolute zoom level. The zoom is changed as fast as possible.
-If the zoom is not finite or non-positive, the zoom part of the command is ignored.
+`pose.position.x` is interpreted as absolute zoom level and is sent immediately
+(see the zoom details below). If the zoom is not finite or is not positive, the zoom part of the
+command is ignored.
 
 #### Zoom details
 
 The node calls `siyi_msgs/srv/SetAbsoluteZoom` on `siyi/set_zoom`, even for velocity commands,
-because the ManualZoom topic is broken. The camera cannot report its zoom level,
+because the ManualZoom service is broken. The camera cannot report its zoom level,
 so the node is the sole authority on it: it keeps its own estimate starting at `initial_zoom`
 (default `1.0`, which is also the minimum), never exceeds `max_zoom` (at most `30.0`), and integrates
-the velocity or pose changes into it. The estimate is sent to topic `siyi/zoom` (latched) and also
+the velocity or pose changes into it at up to `max_zoom_rate` zoom levels per second. The estimate
+is sent to topic `siyi/zoom` (latched) and also
 to `siyi/set_zoom` (`zoom_rate_hz` times per second), so the zoom
 feels velocity-controlled while still being responsive. Only one request is in flight at a time and
 it always carries the newest zoom level.

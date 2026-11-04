@@ -30,7 +30,7 @@ SPDX-FileCopyrightText: Czech Technical University in Prague
   <arg name="max_zoom" default="6.0" description="Upper zoom bound (the driver accepts at most 30.0)" />
   <arg name="max_zoom_rate" default="3.0" description="Maximum rate of change of zoom level (levels per second)" />
   <arg name="initial_zoom" default="1.0" description="Zoom level the node assumes the camera starts at" />
-  <arg name="pos_rate_hz" default="10.0" description="Frequency at which relative pose requests are sent" />
+  <arg name="pos_rate_hz" default="10.0" description="Frequency of the relative-pose control loop (Hz)" />
   <arg name="pos_max_rate" default="$(eval 'math.radians(30.0)')" description="Angular rate used to achieve relative pose target (rad/s)" />
   <arg name="pos_tolerance_deg" default="1.0" description="Pose error below which the requested pose is considered reached" />
   

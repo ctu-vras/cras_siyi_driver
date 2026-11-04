@@ -94,7 +94,6 @@ class CmdVelToGimbal(Node):
 
         self._remaining_delta_yaw = 0.0
         self._remaining_delta_pitch = 0.0
-        self._remaining_delta_zoom = 0.0
         self._remaining_pos_lock = Lock()
 
         zoom_qos = QoSProfile(**qos_profile_system_default.get_c_qos_profile().to_dict())
@@ -205,19 +204,22 @@ class CmdVelToGimbal(Node):
 
     def _on_cmd_pos_rel(self, msg: TwistStamped) -> None:
         with self._remaining_pos_lock:
-            self._remaining_delta_yaw += msg.twist.angular.z
-            self._remaining_delta_pitch += msg.twist.angular.y
+            if math.isfinite(msg.twist.angular.z):
+                self._remaining_delta_yaw += msg.twist.angular.z
+            if math.isfinite(msg.twist.angular.y):
+                self._remaining_delta_pitch += msg.twist.angular.y
 
-        zoom = None
-        with self._zoom_lock:
-            zoom = self._round_zoom(self._zoom_target + msg.twist.linear.x)
-            if zoom != self._zoom_target:
-                self._zoom_target = zoom
-            else:
+            if math.isfinite(msg.twist.linear.x):
                 zoom = None
+                with self._zoom_lock:
+                    zoom = self._round_zoom(self._zoom_target + msg.twist.linear.x)
+                    if zoom != self._zoom_target:
+                        self._zoom_target = zoom
+                    else:
+                        zoom = None
 
-        if zoom is not None:    
-            self._send_zoom(zoom)
+                if zoom is not None:
+                    self._send_zoom(zoom)
 
     def _on_pos_tick(self) -> None:
         if not self._is_executing_pos_command():
@@ -292,7 +294,7 @@ class CmdVelToGimbal(Node):
         return min(self._max_zoom, max(MIN_ZOOM, zoom))
 
     def _clamp_zoom_rate(self, rate: float) -> float:
-        if abs(rate) < MIN_ZOOM_RATE:
+        if abs(rate) < self._zoom_threshold:
             return 0.0
         return min(self._max_zoom_rate, max(-self._max_zoom_rate, rate))
 
@@ -372,7 +374,7 @@ class CmdVelToGimbal(Node):
         return resp
 
     def _on_center_done(self, future, seq: int) -> None:
-        if seq != self._zoom_seq:
+        if seq != self._center_seq:
             return
         try:
             response = future.result()
