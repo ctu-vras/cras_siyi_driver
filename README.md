@@ -29,9 +29,11 @@ Multiple gimbal control modes are available:
 
 #### Rate mode: `siyi/cmd/cmd_vel`
 
-`angular.z` is the requested yaw rate and `angular.y` the requested pitch rate in rad/s.
+`twist.angular.z` is the requested yaw rate and `twist.angular.y` the requested pitch rate in rad/s.
+If either number is not finite, the rate part of the command is ignored.
 
-`linear.x` is interpreted as change in zoom levels per second.
+`twist.linear.x` is interpreted as change in zoom levels per second.
+If the number is not finite, the zoom part of the command is ignored.
 
 #### Relative position mode: `siyi/cmd/cmd_pos_rel`
 
@@ -47,9 +49,11 @@ While a relative position command is being executed, all rate commands are ignor
 
 #### Absolute position mode: `siyi/cmd/cmd_pos`
 
-So far, absolute pose gimbal control is not implemented. Only zoom is working in this mode.
+`pose.orientation` is interpreted as the desired gimbal pose. Only pitch and yaw components are
+used. If the quaternion is invalid or not normalized, the attitude part of the command is ignored.
 
-`linear.x` is interpreted as absolute zoom level. The zoom is changed as fast as possible.
+`pose.position.x` is interpreted as absolute zoom level. The zoom is changed as fast as possible.
+If the zoom is not finite or non-positive, the zoom part of the command is ignored.
 
 #### Zoom details
 
